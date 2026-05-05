@@ -1,0 +1,9 @@
+.env
+data/raw/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+notebooks/
+.git/
+*.index
+*.pkl

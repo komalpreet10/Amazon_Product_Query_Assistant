@@ -3,25 +3,7 @@
 An end-to-end Retrieval-Augmented Generation (RAG) system built over 112K Amazon Beauty products and 700K reviews. The system supports hybrid retrieval (BM25 + Semantic Search), tool-augmented RAG with GPT-4o-mini, input/output guardrails, and a Streamlit web app.
 
 ---
-
-## 🏗️ Architecture
-
-```
-User Query
-    ↓
-Input Guardrails (validate query)
-    ↓
-Hybrid Retrieval (BM25 + Semantic Search + RRF)
-    ↓
-Tool Integration (price filter, rating filter)
-    ↓
-RAG Pipeline (GPT-4o-mini + retrieved context)
-    ↓
-Output Guardrails (validate answer)
-    ↓
-Streamlit App (display answer + products)
-```
-
+🏗️ Architecture ![RAG Architecture](docs/rag_architecture.svg)
 ---
 
 ## ✨ Features

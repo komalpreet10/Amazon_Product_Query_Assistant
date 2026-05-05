@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from src.hybrid import hybrid_search
 from src.tools import apply_tools
+from src.guardrails import check_input, check_output
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -133,6 +134,12 @@ def rag_answer(
     """
     log.info("RAG query: %s", query)
 
+    # input guardrail
+    input_check = check_input(query)
+    if not input_check["valid"]:
+        log.warning("Input guardrail blocked: %s", input_check["reason"])
+        return {"response": input_check["reason"], "retrieved": [], "filters": {}, "context": ""}
+
     # step 1 — retrieve top K products
     retrieved = hybrid_search(bm25, index, products, query, top_k=top_k, model=model)
     log.info("Retrieved %s products", len(retrieved))
@@ -159,6 +166,12 @@ def rag_answer(
 
     answer = response.choices[0].message.content.strip()
     log.info("Answer generated.")
+
+    # output guardrail
+    output_check = check_output(answer, filtered[:top_k])
+    if not output_check["valid"]:
+        log.warning("Output guardrail blocked: %s", output_check["reason"])
+        return {"response": "I couldn't generate a reliable answer. Please try rephrasing your query.", "retrieved": filtered[:top_k], "filters": filters, "context": context}
 
     return {
         "response":  answer,
