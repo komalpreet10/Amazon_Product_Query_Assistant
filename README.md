@@ -3,10 +3,10 @@
 An end-to-end Retrieval-Augmented Generation (RAG) system built over 112K Amazon Beauty products and 700K reviews. The system supports hybrid retrieval (BM25 + Semantic Search), tool-augmented RAG with GPT-4o-mini, input/output guardrails, and a Streamlit web app.
 
 ---
-🏗️ Architecture ![RAG Architecture](docs/rag_architecture.svg)
+Architecture ![RAG Architecture](docs/rag_architecture.svg)
 ---
 
-## ✨ Features
+## Features
 
 - **Hybrid Retrieval** — combines BM25 keyword search and semantic search (all-MiniLM-L6-v2 + FAISS) using Reciprocal Rank Fusion (RRF)
 - **RAG Pipeline** — GPT-4o-mini generates answers grounded in retrieved product context
@@ -18,7 +18,7 @@ An end-to-end Retrieval-Augmented Generation (RAG) system built over 112K Amazon
 
 ---
 
-## 📊 Evaluation Results
+## Evaluation Results
 
 ### Retrieval Metrics
 
@@ -84,7 +84,7 @@ Amazon_Product_Query_Assistant/
 
 ---
 
-## 🚀 Setup
+## Setup
 
 ### 1. Clone the repository
 
@@ -134,7 +134,7 @@ index, embeddings = build_semantic_index(corpus)
 
 ---
 
-## 🖥️ Run the App
+## Run the App
 
 ```bash
 streamlit run app/app.py
@@ -144,7 +144,7 @@ Open `http://localhost:8501` in your browser.
 
 ---
 
-## 🐳 Run with Docker
+##  Run with Docker
 
 ```bash
 docker build -t amazon-assistant .
@@ -153,7 +153,7 @@ docker run -p 8501:8501 --env-file .env amazon-assistant
 
 ---
 
-## 🧪 Run Tests
+## Run Tests
 
 ```bash
 pytest tests/ -v
@@ -161,7 +161,7 @@ pytest tests/ -v
 
 ---
 
-## 📦 Dataset
+## Dataset
 
 - **Source:** [Amazon Reviews 2023](https://amazon-reviews-2023.github.io/) — McAuley Lab, UCSD
 - **Category:** All Beauty
@@ -170,7 +170,7 @@ pytest tests/ -v
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component | Technology |
 |-----------|------------|
