@@ -74,11 +74,12 @@ def hybrid_search(
 
     # build final results
     results = []
-    for asin in ranked_asins:
+    for hybrid_rank, asin in enumerate(ranked_asins, start=1):
         if asin not in product_lookup:
             continue
         product = product_lookup[asin].copy()
         product["hybrid_score"]   = round(rrf_scores[asin], 6)
+        product["hybrid_rank"]    = hybrid_rank
         product["bm25_rank"]      = bm25_ranks.get(asin, None)
         product["semantic_rank"]  = semantic_ranks.get(asin, None)
         results.append(product)

@@ -20,11 +20,15 @@ Usage:
 
 import math
 import logging
+import json
+from pathlib import Path
 from src.bm25 import search_bm25
 from src.semantic import search_semantic
 from src.hybrid import hybrid_search
+from src.reranker import rerank_products
 
 log = logging.getLogger(__name__)
+EVALUATION_OUTPUT_PATH = Path("results/evaluation_metrics.json")
 
 
 # ── core metrics ───────────────────────────────────────────────────────────
@@ -159,3 +163,65 @@ def evaluate_all(
         log.info("%s average: %s", method.upper(), avg)
 
     return results
+
+
+def evaluate_with_reranking(
+    bm25,
+    index,
+    products: list[dict],
+    ground_truth: dict[str, list[str]],
+    model,
+    reranker_model=None,
+    k: int = 5,
+    candidate_multiplier: int = 4,
+    output_path: Path = EVALUATION_OUTPUT_PATH,
+) -> dict:
+    """
+    Evaluates hybrid retrieval before and after cross-encoder reranking.
+
+    Keeps the existing retrieval metrics and writes a portfolio-ready JSON
+    artifact to results/evaluation_metrics.json by default.
+    """
+    results = evaluate_all(bm25, index, products, ground_truth, model, k=k)
+    results["hybrid_reranked"] = {}
+
+    for query, relevant in ground_truth.items():
+        candidate_k = max(k * candidate_multiplier, k)
+        hybrid_candidates = hybrid_search(
+            bm25,
+            index,
+            products,
+            query,
+            top_k=candidate_k,
+            model=model,
+        )
+        reranked = rerank_products(
+            query,
+            hybrid_candidates,
+            top_k=k,
+            model=reranker_model,
+        )
+        reranked_ids = [result["parent_asin"] for result in reranked]
+        results["hybrid_reranked"][query] = evaluate(reranked_ids, relevant, k)
+
+    scores = results["hybrid_reranked"]
+    results["hybrid_reranked"]["average"] = {
+        metric: round(sum(score[metric] for score in scores.values()) / len(scores), 4)
+        for metric in [f"precision@{k}", "mrr", f"ndcg@{k}"]
+    }
+
+    output = {
+        "k": k,
+        "methods": results,
+        "comparison": {
+            "hybrid_average": results["hybrid"]["average"],
+            "hybrid_reranked_average": results["hybrid_reranked"]["average"],
+        },
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2)
+    log.info("Evaluation metrics saved -> %s", output_path)
+
+    return output

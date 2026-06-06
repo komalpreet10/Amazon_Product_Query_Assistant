@@ -14,15 +14,15 @@ import logging
 import json
 from pathlib import Path
 
-import nltk
-from nltk.corpus import stopwords
-
 # ── logging ────────────────────────────────────────────────────────────────
 log = logging.getLogger(__name__)
 
-# ── download stopwords once ────────────────────────────────────────────────
-nltk.download("stopwords", quiet=True)
-STOPWORDS = set(stopwords.words("english"))
+# Keep tokenization deterministic and free of import-time network downloads.
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has",
+    "he", "in", "is", "it", "its", "of", "on", "or", "that", "the", "to",
+    "was", "were", "will", "with",
+}
 
 
 # ── tokenizer ──────────────────────────────────────────────────────────────
@@ -110,6 +110,12 @@ def load_products(path: Path = Path("data/processed/products.jsonl")) -> list[di
     Returns:
         List of product dicts.
     """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Processed product catalog not found at {path}. "
+            "Build or mount data/processed/products.jsonl before starting the service."
+        )
+
     log.info("Loading products from %s...", path)
     with open(path, "r", encoding="utf-8") as f:
         products = [json.loads(line) for line in f if line.strip()]

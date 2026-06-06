@@ -8,15 +8,11 @@ Run:
     streamlit run app/app.py
 """
 
-import sys
 import json
 import logging
 from pathlib import Path
 
 import streamlit as st
-
-# ── path setup ─────────────────────────────────────────────────────────────
-sys.path.append(str(Path(__file__).parent.parent))
 
 from src.bm25 import load_bm25, search_bm25
 from src.semantic import load_semantic_index, search_semantic

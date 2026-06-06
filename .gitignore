@@ -1,4 +1,10 @@
 .env
+.venv/
+venv/
+.idea/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 data/raw/
 data/processed/
 *.index
@@ -6,6 +12,8 @@ data/processed/
 *.jsonl
 __pycache__/
 .ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
 *.egg-info/
 dist/
+logs/
 .DS_Store

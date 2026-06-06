@@ -1,186 +1,297 @@
-# 🛍️ Amazon Product Query Assistant
+# Amazon Product Query Assistant
 
-An end-to-end Retrieval-Augmented Generation (RAG) system built over 112K Amazon Beauty products and 700K reviews. The system supports hybrid retrieval (BM25 + Semantic Search), tool-augmented RAG with GPT-4o-mini, input/output guardrails, and a Streamlit web app.
+Portfolio-ready Retrieval-Augmented Generation project for Amazon beauty and personal care product discovery. It combines BM25 keyword search, FAISS semantic retrieval, Reciprocal Rank Fusion, cross-encoder reranking, grounded GPT answers, source citations, guardrails, evaluation, Streamlit exploration, and a FastAPI service.
 
----
-Architecture ![RAG Architecture](docs/rag_architecture.svg)
----
+![RAG Architecture](docs/rag_architecture.svg)
 
-## Features
+## Dataset
 
-- **Hybrid Retrieval** — combines BM25 keyword search and semantic search (all-MiniLM-L6-v2 + FAISS) using Reciprocal Rank Fusion (RRF)
-- **RAG Pipeline** — GPT-4o-mini generates answers grounded in retrieved product context
-- **Tool Integration** — automatic price and rating filter detection from natural language queries
-- **Guardrails** — input validation (off-topic, harmful, gibberish detection) and output validation (medical claims, grounding checks)
-- **Evaluation** — retrieval quality (Precision@5, MRR, NDCG@5) and RAG quality (RAGAS faithfulness, answer relevancy)
-- **Streamlit App** — interactive web app with BM25 / Semantic / Hybrid / RAG search modes
-- **Docker + CI/CD** — containerized with Docker, automated testing with GitHub Actions
+The local processed artifacts were built from Amazon Reviews 2023 All Beauty:
 
----
+- Products: 112,590
+- Reviews: 701,528
+- Runtime artifacts: `products.jsonl`, `bm25_index.pkl`, `tokenized_corpus.pkl`, `faiss.index`, `embeddings.npy`
 
-## Evaluation Results
+Raw and processed data are intentionally gitignored. Mount or rebuild them before running the API or Streamlit app.
 
-### Retrieval Metrics
+## Architecture
+
+```mermaid
+flowchart LR
+    U[User] --> API[FastAPI app/api.py]
+    U --> ST[Streamlit app/app.py]
+    API --> SVC[RAGService]
+    ST --> RET[Retrieval Modules]
+    SVC --> RET
+    RET --> BM25[BM25]
+    RET --> FAISS[FAISS Semantic Search]
+    BM25 --> RRF[Reciprocal Rank Fusion]
+    FAISS --> RRF
+    RRF --> CE[Cross-Encoder Reranker]
+    CE --> TOOLS[Price and Rating Filters]
+    TOOLS --> CTX[Grounded Context]
+    CTX --> LLM[OpenAI GPT-4o-mini]
+    LLM --> GUARD[Output Guardrails]
+    GUARD --> CITES[Answer and Sources]
+```
+
+## Retrieval Pipeline
+
+1. Load processed products, BM25 index, FAISS index, and embedding model.
+2. Run BM25 keyword retrieval over tokenized product text.
+3. Run FAISS semantic retrieval with `all-MiniLM-L6-v2` embeddings.
+4. Fuse BM25 and semantic results with Reciprocal Rank Fusion.
+5. Return product metadata, BM25/semantic ranks, hybrid score, and hybrid rank.
+
+## Reranking Pipeline
+
+Hybrid candidates are reranked with `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+
+The API returns both:
+
+- `original_hybrid_rank`: rank before cross-encoder reranking.
+- `rerank_position`: final rank after reranking.
+
+This keeps the method easy to defend in interviews: BM25 catches exact terms, FAISS catches semantic intent, RRF merges both, and the cross-encoder makes a final query-document relevance judgment on a small candidate set.
+
+## RAG Generation Flow
+
+`POST /ask` runs:
+
+1. Pydantic request validation.
+2. Input guardrail validation.
+3. Hybrid retrieval.
+4. Cross-encoder reranking.
+5. Price/rating filter detection and application.
+6. Prompt construction from retrieved product context only.
+7. Grounded OpenAI answer generation with bracket citations.
+8. Output guardrail validation.
+9. Fallback response when context is weak or LLM generation fails.
+
+Generated answers should only recommend products present in the retrieved context. API responses include source titles, ASINs, scores, ranks, snippets, and latency breakdowns.
+
+## Evaluation
+
+Existing evaluation support is preserved:
+
+- Precision@K
+- MRR
+- NDCG@K
+- RAGAS faithfulness
+- RAGAS answer relevancy
+
+Added:
+
+- Hybrid before/after reranking comparison.
+- JSON output at `results/evaluation_metrics.json`.
+
+Example:
+
+```python
+from src.retrieval_metrics import evaluate_with_reranking
+
+metrics = evaluate_with_reranking(
+    bm25=bm25,
+    index=index,
+    products=products,
+    ground_truth=ground_truth,
+    model=embedding_model,
+    reranker_model=reranker_model,
+    k=5,
+)
+```
+
+Existing reported retrieval metrics:
 
 | Method | Precision@5 | MRR | NDCG@5 |
-|--------|-------------|-----|--------|
+|---|---:|---:|---:|
 | BM25 | 0.60 | 0.75 | 0.60 |
 | Semantic | 0.66 | 0.83 | 0.69 |
-| **Hybrid** | **0.78** | 0.73 | **0.71** |
+| Hybrid | 0.78 | 0.73 | 0.71 |
 
-### RAGAS Metrics
+Existing RAGAS results:
 
 | Metric | Score |
-|--------|-------|
+|---|---:|
 | Faithfulness | 0.57 |
-| Answer Relevancy | 0.60 |
+| Answer relevancy | 0.60 |
 
----
+## Project Structure
 
-## 📁 Project Structure
-
-```
-Amazon_Product_Query_Assistant/
-│
-├── README.md
-├── requirements.txt
-├── Dockerfile
-├── .env                          
-├── .gitignore
-│
-├── data/
-│   ├── raw/                      # raw .jsonl files (gitignored)
-│   └── processed/                # products.jsonl, FAISS index, BM25 index
-│
-├── notebooks/
-│   └── amazon_product_assistant.ipynb
-│
-├── src/
-│   ├── preprocessor.py           # data cleaning + merging
-│   ├── utils.py                  # tokenization + corpus building
-│   ├── bm25.py                   # BM25 index + search
-│   ├── semantic.py               # embeddings + FAISS index + search
-│   ├── hybrid.py                 # RRF hybrid search
-│   ├── tools.py                  # price + rating filters
-│   ├── rag.py                    # RAG pipeline
-│   ├── guardrails.py             # input + output validation
-│   ├── retrieval_metrics.py      # Precision@K, MRR, NDCG
-│   └── ragas_eval.py             # RAGAS evaluation
-│
-├── app/
-│   └── app.py                    # Streamlit app
-│
-├── results/
-│   ├── discussion.md             
-│   └── ragas_results.json        
-│
-├── tests/
-│   └── test_retrieval.py         
-│
-└── .github/
-    └── workflows/
-        └── ci.yml                
+```text
+app/
+  api.py                # FastAPI service
+  schemas.py            # Pydantic contracts
+  app.py                # Streamlit demo
+api/
+  app.py                # Compatibility wrapper for app.api
+src/
+  bm25.py               # BM25 build/load/search
+  semantic.py           # FAISS semantic build/load/search
+  hybrid.py             # Reciprocal Rank Fusion
+  reranker.py           # Cross-encoder reranking
+  rag.py                # Grounded generation
+  service.py            # API orchestration and metrics
+  citations.py          # Source metadata
+  guardrails.py         # Input/output validation
+  tools.py              # Price/rating filters
+  retrieval_metrics.py  # Precision, MRR, NDCG, rerank comparison
+  ragas_eval.py         # RAGAS evaluation
+tests/
+  test_api.py
+  test_evaluation.py
+  test_reranker.py
+  test_retrieval.py
 ```
 
----
-
-## Setup
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/komalpreet10/Amazon_Product_Query_Assistant.git
-cd Amazon_Product_Query_Assistant
-```
-
-### 2. Create virtual environment
+## Local Setup
 
 ```bash
 python -m venv venv
 source venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
-```
-
-### 4. Set up environment variables
-
-```bash
 cp .env.example .env
 ```
 
-Add your API keys to `.env`:
+Set `OPENAI_API_KEY` in `.env` for `/ask` generation.
 
-```
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
-HF_TOKEN=hf_xxxxxxxxxxxxxxxx
-```
+Required processed artifacts:
 
-### 5. Build indexes
-
-```python
-from src.preprocessor import build_products
-from src.utils import build_corpus
-from src.bm25 import build_bm25
-from src.semantic import build_semantic_index
-
-corpus, tokenized_corpus = build_corpus(products)
-bm25 = build_bm25(tokenized_corpus)
-index, embeddings = build_semantic_index(corpus)
+```text
+data/processed/products.jsonl
+data/processed/bm25_index.pkl
+data/processed/tokenized_corpus.pkl
+data/processed/faiss.index
+data/processed/embeddings.npy
 ```
 
----
+## Run FastAPI
 
-## Run the App
+```bash
+uvicorn app.api:app --host 0.0.0.0 --port 8000
+```
+
+Health:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Metrics:
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+## API Examples
+
+Search:
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"best moisturizer for sensitive skin","top_k":3,"mode":"rerank"}'
+```
+
+Search response shape:
+
+```json
+{
+  "query": "best moisturizer for sensitive skin",
+  "mode": "rerank",
+  "results": [
+    {
+      "parent_asin": "B000...",
+      "title": "Sensitive Skin Moisturizer",
+      "hybrid_score": 0.031,
+      "original_hybrid_rank": 4,
+      "rerank_score": 8.42,
+      "rerank_position": 1,
+      "snippet": "Review or product text snippet..."
+    }
+  ],
+  "retrieval_latency_ms": 42.3,
+  "reranking_latency_ms": 18.7,
+  "latency_ms": 61.4
+}
+```
+
+Ask:
+
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"query":"best moisturizer for sensitive skin under $30","top_k":3}'
+```
+
+Ask response shape:
+
+```json
+{
+  "response": "A good option is Sensitive Skin Moisturizer because ... [1]",
+  "sources": [
+    {
+      "parent_asin": "B000...",
+      "title": "Sensitive Skin Moisturizer",
+      "original_hybrid_rank": 2,
+      "rerank_position": 1,
+      "rerank_score": 7.91,
+      "snippet": "Review or product text snippet..."
+    }
+  ],
+  "retrieved": [
+    {
+      "parent_asin": "B000...",
+      "title": "Sensitive Skin Moisturizer",
+      "original_hybrid_rank": 2,
+      "rerank_position": 1,
+      "rerank_score": 7.91,
+      "snippet": "Review or product text snippet..."
+    }
+  ],
+  "filters": {"max_price": 30.0},
+  "citations": [{"id": 1, "parent_asin": "B000...", "title": "Sensitive Skin Moisturizer"}],
+  "guardrail_decision": "allowed",
+  "retrieval_latency_ms": 44.1,
+  "reranking_latency_ms": 19.5,
+  "generation_latency_ms": 812.4,
+  "latency_ms": 876.0
+}
+```
+
+## Run Streamlit
 
 ```bash
 streamlit run app/app.py
 ```
 
-Open `http://localhost:8501` in your browser.
-
----
-
-##  Run with Docker
-
-```bash
-docker build -t amazon-assistant .
-docker run -p 8501:8501 --env-file .env amazon-assistant
-```
-
----
-
 ## Run Tests
 
 ```bash
-pytest tests/ -v
+pytest -q
 ```
 
----
+Current tests cover retrieval metrics, guardrails, tools, reranking metadata, evaluation output, API endpoints, and Pydantic schema validation.
 
-## Dataset
+## Docker
 
-- **Source:** [Amazon Reviews 2023](https://amazon-reviews-2023.github.io/) — McAuley Lab, UCSD
-- **Category:** All Beauty
-- **Products:** 112,590
-- **Reviews:** 701,528
+Build:
 
----
+```bash
+docker build -t amazon-product-rag .
+```
 
-## Tech Stack
+Run with processed artifacts mounted:
 
-| Component | Technology |
-|-----------|------------|
-| Data | HuggingFace Datasets, Amazon Reviews 2023 |
-| Keyword Search | rank-bm25 |
-| Semantic Search | sentence-transformers (all-MiniLM-L6-v2) |
-| Vector Store | FAISS |
-| LLM | OpenAI GPT-4o-mini |
-| RAG Evaluation | RAGAS |
-| App | Streamlit |
-| Containerization | Docker |
-| CI/CD | GitHub Actions |
-| Language | Python 3.11 |
+```bash
+docker run --env-file .env \
+  -p 8000:8000 \
+  -v "$PWD/data/processed:/app/data/processed:ro" \
+  amazon-product-rag
+```
+
+The container runs `uvicorn app.api:app`. Logs are written to `logs/retrieval.log` in the container filesystem unless a log volume is mounted.
+
+## Logging
+
+The API logs query text, retrieval mode, guardrail decision, result count, and latency metrics. It does not log API keys. Runtime logs are ignored by git.

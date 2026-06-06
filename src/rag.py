@@ -18,13 +18,16 @@ Usage:
     print(answer["response"])
 """
 
-import os
 import logging
+import time
+from functools import lru_cache
 from dotenv import load_dotenv
 from openai import OpenAI
 from src.hybrid import hybrid_search
 from src.tools import apply_tools
 from src.guardrails import check_input, check_output
+from src.reranker import rerank_products
+from src.citations import build_citations
 
 load_dotenv()
 log = logging.getLogger(__name__)
@@ -32,7 +35,14 @@ log = logging.getLogger(__name__)
 # ── config ─────────────────────────────────────────────────────────────────
 TOP_K      = 5
 LLM_MODEL  = "gpt-4o-mini"
-client     = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+@lru_cache(maxsize=1)
+def get_openai_client() -> OpenAI:
+    """
+    Creates the OpenAI client only when generation is requested.
+    """
+    return OpenAI()
 
 
 # ── context builder ────────────────────────────────────────────────────────
@@ -92,6 +102,7 @@ def build_prompt(query: str, context: str, filters: dict) -> str:
     prompt = f"""You are a helpful Amazon product assistant. Answer the user's query based ONLY on the products provided below. 
 Do not make up information or recommend products not in the list.
 Be concise, helpful, and specific. Mention product names, prices, and ratings when available.
+Use bracket citations like [1] or [2] for every product recommendation, matching the product numbers below.
 {filter_note}
 
 User Query: {query}
@@ -113,6 +124,8 @@ def rag_answer(
     products: list[dict],
     model,
     top_k: int = TOP_K,
+    reranker_model=None,
+    use_reranker: bool = True,
 ) -> dict:
     """
     Full RAG pipeline: retrieve → filter → generate answer.
@@ -133,18 +146,40 @@ def rag_answer(
             - context:   Context string passed to LLM
     """
     log.info("RAG query: %s", query)
+    started = time.perf_counter()
 
     # input guardrail
     input_check = check_input(query)
     if not input_check["valid"]:
         log.warning("Input guardrail blocked: %s", input_check["reason"])
-        return {"response": input_check["reason"], "retrieved": [], "filters": {}, "context": ""}
+        return {
+            "response": input_check["reason"],
+            "retrieved": [],
+            "filters": {},
+            "context": "",
+            "citations": [],
+            "guardrail_decision": "blocked",
+            "retrieval_latency_ms": 0.0,
+            "reranking_latency_ms": 0.0,
+            "generation_latency_ms": 0.0,
+        }
 
-    # step 1 — retrieve top K products
-    retrieved = hybrid_search(bm25, index, products, query, top_k=top_k, model=model)
-    log.info("Retrieved %s products", len(retrieved))
+    # step 1 — retrieve RRF candidates
+    candidate_k = max(top_k * 4, top_k) if use_reranker else top_k
+    retrieval_started = time.perf_counter()
+    retrieved = hybrid_search(bm25, index, products, query, top_k=candidate_k, model=model)
+    retrieval_latency_ms = (time.perf_counter() - retrieval_started) * 1000
+    log.info("Retrieved %s hybrid candidates", len(retrieved))
 
-    # step 2 — apply tools (price/rating filters)
+    # step 2 — rerank RRF candidates
+    reranking_latency_ms = 0.0
+    if use_reranker and retrieved:
+        reranking_started = time.perf_counter()
+        retrieved = rerank_products(query, retrieved, top_k=top_k, model=reranker_model)
+        reranking_latency_ms = (time.perf_counter() - reranking_started) * 1000
+        log.info("Reranked to %s products", len(retrieved))
+
+    # step 3 — apply tools (price/rating filters)
     filtered, filters = apply_tools(retrieved, query)
 
     # fall back to retrieved if filters remove everything
@@ -152,30 +187,82 @@ def rag_answer(
         log.warning("Filters removed all products — using unfiltered results")
         filtered = retrieved
 
-    # step 3 — build context + prompt
+    # step 4 — build context + prompt
     context = build_context(filtered[:top_k])
     prompt  = build_prompt(query, context, filters)
+    citations = build_citations(filtered[:top_k])
 
-    # step 4 — generate answer
-    response = client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=500,
-        temperature=0.3,
-    )
+    if not filtered or not context.strip():
+        log.warning("Generation skipped because retrieved context is empty")
+        return {
+            "response": "I could not find enough relevant product context to answer reliably. Try a more specific beauty or personal care query.",
+            "retrieved": [],
+            "filters": filters,
+            "context": context,
+            "citations": citations,
+            "guardrail_decision": "allowed_weak_context",
+            "retrieval_latency_ms": round(retrieval_latency_ms, 2),
+            "reranking_latency_ms": round(reranking_latency_ms, 2),
+            "generation_latency_ms": 0.0,
+        }
+
+    # step 5 — generate answer
+    generation_started = time.perf_counter()
+    try:
+        response = get_openai_client().chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.3,
+        )
+    except Exception as exc:
+        generation_latency_ms = (time.perf_counter() - generation_started) * 1000
+        log.exception("LLM generation failed: %s", exc)
+        return {
+            "response": "I found relevant products, but answer generation failed. Review the sources below for the most relevant matches.",
+            "retrieved": filtered[:top_k],
+            "filters": filters,
+            "context": context,
+            "citations": citations,
+            "guardrail_decision": "allowed_generation_fallback",
+            "retrieval_latency_ms": round(retrieval_latency_ms, 2),
+            "reranking_latency_ms": round(reranking_latency_ms, 2),
+            "generation_latency_ms": round(generation_latency_ms, 2),
+        }
+    generation_latency_ms = (time.perf_counter() - generation_started) * 1000
 
     answer = response.choices[0].message.content.strip()
-    log.info("Answer generated.")
+    log.info(
+        "Answer generated. retrieved=%s generation_latency_ms=%.2f total_latency_ms=%.2f",
+        len(filtered[:top_k]),
+        generation_latency_ms,
+        (time.perf_counter() - started) * 1000,
+    )
 
     # output guardrail
     output_check = check_output(answer, filtered[:top_k])
     if not output_check["valid"]:
         log.warning("Output guardrail blocked: %s", output_check["reason"])
-        return {"response": "I couldn't generate a reliable answer. Please try rephrasing your query.", "retrieved": filtered[:top_k], "filters": filters, "context": context}
+        return {
+            "response": "I couldn't generate a reliable answer. Please try rephrasing your query.",
+            "retrieved": filtered[:top_k],
+            "filters": filters,
+            "context": context,
+            "citations": citations,
+            "guardrail_decision": "blocked_output",
+            "retrieval_latency_ms": round(retrieval_latency_ms, 2),
+            "reranking_latency_ms": round(reranking_latency_ms, 2),
+            "generation_latency_ms": round(generation_latency_ms, 2),
+        }
 
     return {
         "response":  answer,
         "retrieved": filtered[:top_k],
         "filters":   filters,
         "context":   context,
+        "citations": citations,
+        "guardrail_decision": "allowed",
+        "retrieval_latency_ms": round(retrieval_latency_ms, 2),
+        "reranking_latency_ms": round(reranking_latency_ms, 2),
+        "generation_latency_ms": round(generation_latency_ms, 2),
     }

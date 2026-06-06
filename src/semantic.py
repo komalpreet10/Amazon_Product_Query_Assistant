@@ -97,6 +97,14 @@ def load_semantic_index(
     Returns:
         Tuple of (faiss_index, embeddings)
     """
+    missing = [path for path in (faiss_path, embeddings_path) if not path.exists()]
+    if missing:
+        missing_list = ", ".join(str(path) for path in missing)
+        raise FileNotFoundError(
+            f"Semantic search artifacts not found: {missing_list}. "
+            "Build or mount data/processed artifacts before starting the service."
+        )
+
     log.info("Loading FAISS index from %s...", faiss_path)
     index      = faiss.read_index(str(faiss_path))
     embeddings = np.load(embeddings_path)

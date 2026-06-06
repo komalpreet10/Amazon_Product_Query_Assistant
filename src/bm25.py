@@ -84,6 +84,14 @@ def load_bm25(
     Returns:
         Tuple of (BM25Okapi index, tokenized_corpus)
     """
+    missing = [path for path in (save_path, corpus_path) if not path.exists()]
+    if missing:
+        missing_list = ", ".join(str(path) for path in missing)
+        raise FileNotFoundError(
+            f"BM25 artifacts not found: {missing_list}. "
+            "Build or mount data/processed artifacts before starting the service."
+        )
+
     log.info("Loading BM25 index from %s...", save_path)
     with open(save_path, "rb") as f:
         bm25 = pickle.load(f)
