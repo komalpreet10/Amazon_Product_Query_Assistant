@@ -1,6 +1,6 @@
 # Amazon Product Query Assistant
 
-Portfolio-ready Retrieval-Augmented Generation project for Amazon beauty and personal care product discovery. It combines BM25 keyword search, FAISS semantic retrieval, Reciprocal Rank Fusion, cross-encoder reranking, grounded GPT answers, source citations, guardrails, evaluation, Streamlit exploration, and a FastAPI service.
+It combines BM25 keyword search, FAISS semantic retrieval, Reciprocal Rank Fusion, cross-encoder reranking, grounded GPT answers, source citations, guardrails, evaluation, Streamlit exploration, and a FastAPI service.
 
 ![RAG Architecture](docs/rag_architecture.svg)
 
