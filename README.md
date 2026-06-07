@@ -12,7 +12,6 @@ The local processed artifacts were built from Amazon Reviews 2023 All Beauty:
 - Reviews: 701,528
 - Runtime artifacts: `products.jsonl`, `bm25_index.pkl`, `tokenized_corpus.pkl`, `faiss.index`, `embeddings.npy`
 
-Raw and processed data are intentionally gitignored. Mount or rebuild them before running the API or Streamlit app.
 
 ## Architecture
 
@@ -51,8 +50,6 @@ The API returns both:
 
 - `original_hybrid_rank`: rank before cross-encoder reranking.
 - `rerank_position`: final rank after reranking.
-
-This keeps the method easy to defend in interviews: BM25 catches exact terms, FAISS catches semantic intent, RRF merges both, and the cross-encoder makes a final query-document relevance judgment on a small candidate set.
 
 ## RAG Generation Flow
 
